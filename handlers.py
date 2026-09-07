@@ -23,11 +23,12 @@ GAME_CONFIG = {
     "current_answer": None
 }
 
-# Jonli duet navbati uchun kutayotgan foydalanuvchilar
+# Jonli duet navbati va faol xonalar
 DUET_QUEUE = []
-ACTIVE_DUETS = {}      # room_id: {p1, p2, answer, question, message_id_p1, message_id_p2}
+ACTIVE_DUETS = {}      
 
-ADMIN_IDS = {8007670371}  # Sizning Admin ID'ingiz
+# O'z Telegram ID raqamingizni shu yerga yozing (Admin ID)
+ADMIN_IDS = {8007670371}  
 
 class WithdrawStates(StatesGroup):
     waiting_for_card = State()
@@ -79,7 +80,7 @@ async def cmd_start(message: Message, bot: Bot):
     uid = message.from_user.id
     args = message.text.split()
     
-    # Referal tizimini qayta ishlash (@abevayn_bot orqali)
+    # Referal tizimi (@abevayn_bot orqali kirganlar uchun)
     if len(args) > 1:
         ref_id_str = args[1]
         if ref_id_str.isdigit():
@@ -128,18 +129,15 @@ async def cb_live_duet(call: CallbackQuery, bot: Bot):
     uid = call.from_user.id
     u = get_user(uid)
     
-    # 24 soatlik cheklovni tekshirish (yutqazganlar uchun)
     current_time = time.time()
     if current_time - u["last_duet_time"] < 86400:
         remaining_hours = int((86400 - (current_time - u["last_duet_time"])) / 3600)
         await call.answer(f"⏳ Siz oxirgi duetda mag'lub bo'lgansiz! Yana o'ynash uchun {remaining_hours} soat qoldi.", show_alert=True)
         return
 
-    # Reytingda TOP-10 talikda bor-yo'qligini tekshirish uchun saralash
     sorted_users = sorted(USERS_DB.items(), key=lambda x: x[1]["score"], reverse=True)
     top10_ids = [u_id for u_id, _ in sorted_users[:10]]
     
-    # Agar hali top 10 shakllanmagan bo'lsa yoki foydalanuvchi top 10 ichida bo'lsa
     if len(sorted_users) >= 3 and uid not in top10_ids:
         await call.answer("⚠️ Jonli duetda faqat REYTINGDAGI TOP-10 talik ichidagi o'yinchilar qatnasha oladi! Avval umumiy o'yinlarda ball to'plab topga kiring.", show_alert=True)
         return
@@ -152,7 +150,6 @@ async def cb_live_duet(call: CallbackQuery, bot: Bot):
     await call.message.edit_text("🔍 **JONLI DUET QIDIRUVDA...**\n\nSizga munosib raqib izlanmoqda, iltimos kuting ⏳", reply_markup=kb.back_to_menu_kb(), parse_mode="Markdown")
     await call.answer()
 
-    # Agar navbatda 2 ta odam yig'ilsa, o'yinni boshlaymiz
     if len(DUET_QUEUE) >= 2:
         p1 = DUET_QUEUE.pop(0)
         p2 = DUET_QUEUE.pop(0)
@@ -224,7 +221,7 @@ async def cb_my_profile(call: CallbackQuery):
     u = get_user(call.from_user.id, call.from_user.full_name, call.from_user.username)
     league = get_league(u["score"])
     text = (
-        f"👤 **FOYDALANUVCHI PROFILI** 🛡️\n\n"
+        f"👤 **FOYdALANUVCHI PROFILI** 🛡️\n\n"
         f"📌 **F.I.O:** {u['full_name']}\n"
         f"🔗 **Username:** @{u['username']}\n"
         f"🏆 **Daraja (Liga):** **{league}**\n"
@@ -318,8 +315,8 @@ async def admin_wd_decision(call: CallbackQuery, bot: Bot):
             pass
     await call.answer("Bajarildi!")
 
-# --- XABARLAR VA O'YINLARNI TEKSHIRISH ---
-@router.message()
+# --- XABARLAR VA O'YINLARNI TEKSHIRISH (Faqat oddiy matnlar uchun) ---
+@router.message(F.text & ~F.text.startswith("/"))
 async def check_game_answer(message: Message, bot: Bot):
     uid = message.from_user.id
     if CHANNELS_DB and not await check_channels_subscription(bot, uid):
@@ -335,18 +332,15 @@ async def check_game_answer(message: Message, bot: Bot):
                 winner_id = uid
                 loser_id = duet["p2"] if uid == duet["p1"] else duet["p1"]
                 
-                # G'olibga ball va balans qo'shish (+1 ball reytingga)
                 w_user = get_user(winner_id)
                 w_user["balance"] += 2000
                 w_user["total_won"] += 2000
                 w_user["wins_count"] += 1
                 w_user["score"] += 1
 
-                # Yutqazganga 24 soatlik cheklov qo'yish
                 l_user = get_user(loser_id)
                 l_user["last_duet_time"] = time.time()
 
-                # Xabarlarni yuborish
                 try:
                     await bot.send_message(winner_id, "🎉 **TABRIKLAYMIZ! Siz jonli duetda g'alaba qozondingiz!** 🏆\nBalansingizga `2 000 UZS` qo'shildi va reytingga `+1 ball` yozildi!", parse_mode="Markdown")
                     await bot.send_message(loser_id, "❌ Afsuski, jonli duetda yutqazib qo'ydingiz. Ertaga yana urinib ko'rishingiz mumkin! ⏳", parse_mode="Markdown")
@@ -365,7 +359,7 @@ async def check_game_answer(message: Message, bot: Bot):
             u["balance"] += 3000
             u["total_won"] += 3000
             u["wins_count"] += 1
-            u["score"] += 1  # Reyting uchun +1 ball
+            u["score"] += 1  
 
             win_text = (
                 f"🎉 **TABRIKLAYMIZ! G'OLIB ANIQLANDI!** 🏆\n\n"
@@ -494,4 +488,3 @@ async def background_scheduler(bot: Bot):
             await trigger_game(bot)
             await asyncio.sleep(60)
         await asyncio.sleep(30)
-
