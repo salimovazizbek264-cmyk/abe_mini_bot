@@ -116,7 +116,7 @@ async def cb_back_to_menu(call: CallbackQuery):
 @router.callback_query(F.data == "start_game")
 async def cb_start_game(call: CallbackQuery):
     await call.message.edit_text(
-        f"⏳ **Asosiy o'yin kutish rejimida!**\n\n⏰ Vaqtlar: `{GAME_CONFIG['time1']}` va `{GAME_CONFIG['time2']}`\n\n💡 Shuningdek, asosiy menyudan **"⚔️ JONLI DUET"** tugmasini bosib istalgan vaqtda raqib bilan bellashishingiz mumkin!",
+        f"⏳ **Asosiy o'yin kutish rejimida!**\n\n⏰ Vaqtlar: `{GAME_CONFIG['time1']}` va `{GAME_CONFIG['time2']}`\n\n💡 Shuningdek, asosiy menyudan **'⚔️ JONLI DUET'** tugmasini bosib istalgan vaqtda raqib bilan bellashishingiz mumkin!",
         reply_markup=kb.back_to_menu_kb(),
         parse_mode="Markdown"
     )
@@ -342,7 +342,7 @@ async def check_game_answer(message: Message, bot: Bot):
                 w_user["wins_count"] += 1
                 w_user["score"] += 1
 
-                # Yutqazganga 24 soatlik chekloch qo'yish
+                # Yutqazganga 24 soatlik cheklov qo'yish
                 l_user = get_user(loser_id)
                 l_user["last_duet_time"] = time.time()
 
@@ -494,3 +494,4 @@ async def background_scheduler(bot: Bot):
             await trigger_game(bot)
             await asyncio.sleep(60)
         await asyncio.sleep(30)
+
