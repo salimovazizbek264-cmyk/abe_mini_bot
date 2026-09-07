@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -25,9 +25,8 @@ GAME_CONFIG = {
 
 # Jonli duet navbati va faol xonalar
 DUET_QUEUE = []
-ACTIVE_DUETS = {}      
+ACTIVE_DUETS = {}      # room_id: {p1, p2, answer, question}
 
-# O'z Telegram ID raqamingizni shu yerga yozing (Admin ID)
 ADMIN_IDS = {8007670371}  
 
 class WithdrawStates(StatesGroup):
@@ -80,7 +79,6 @@ async def cmd_start(message: Message, bot: Bot):
     uid = message.from_user.id
     args = message.text.split()
     
-    # Referal tizimi (@abevayn_bot orqali kirganlar uchun)
     if len(args) > 1:
         ref_id_str = args[1]
         if ref_id_str.isdigit():
@@ -167,8 +165,7 @@ async def cb_live_duet(call: CallbackQuery, bot: Bot):
         
         for pid in [p1, p2]:
             try:
-                msg = await bot.send_message(pid, duet_text, parse_mode="Markdown")
-                ACTIVE_DUETS[room_id][f"msg_{pid}"] = msg.message_id
+                await bot.send_message(pid, duet_text, parse_mode="Markdown")
             except:
                 pass
 
@@ -315,41 +312,99 @@ async def admin_wd_decision(call: CallbackQuery, bot: Bot):
             pass
     await call.answer("Bajarildi!")
 
-# --- XABARLAR VA O'YINLARNI TEKSHIRISH (Faqat oddiy matnlar uchun) ---
-@router.message(F.text & ~F.text.startswith("/"))
+# --- XABARLAR VA JONLI DUET / O'YINLARNI TEKSHIRISH ---
+@router.message(F.text)
 async def check_game_answer(message: Message, bot: Bot):
     uid = message.from_user.id
+    text = message.text.strip()
+
     if CHANNELS_DB and not await check_channels_subscription(bot, uid):
         return
 
-    user_ans = message.text.strip().lower()
+    user_ans = text.lower()
 
     # 1. Jonli duet javobini tekshirish
+    matched_room = None
     for room_id, duet in list(ACTIVE_DUETS.items()):
         if uid in [duet["p1"], duet["p2"]]:
-            correct_answers = duet["answer"]
-            if any(ans in user_ans for ans in correct_answers):
-                winner_id = uid
-                loser_id = duet["p2"] if uid == duet["p1"] else duet["p1"]
-                
-                w_user = get_user(winner_id)
-                w_user["balance"] += 2000
-                w_user["total_won"] += 2000
-                w_user["wins_count"] += 1
-                w_user["score"] += 1
+            matched_room = (room_id, duet)
+            break
 
-                l_user = get_user(loser_id)
-                l_user["last_duet_time"] = time.time()
+    if matched_room:
+        room_id, duet = matched_room
+        correct_answers = duet["answer"]
+        is_correct = any(ans in user_ans for ans in correct_answers)
 
-                try:
-                    await bot.send_message(winner_id, "🎉 **TABRIKLAYMIZ! Siz jonli duetda g'alaba qozondingiz!** 🏆\nBalansingizga `2 000 UZS` qo'shildi va reytingga `+1 ball` yozildi!", parse_mode="Markdown")
-                    await bot.send_message(loser_id, "❌ Afsuski, jonli duetda yutqazib qo'ydingiz. Ertaga yana urinib ko'rishingiz mumkin! ⏳", parse_mode="Markdown")
-                except:
-                    pass
+        winner_id = uid
+        loser_id = duet["p2"] if uid == duet["p1"] else duet["p1"]
 
-                del ACTIVE_DUETS[room_id]
-                return
-            
+        if is_correct:
+            # To'g'ri javob berdi
+            w_user = get_user(winner_id)
+            w_user["balance"] += 2000
+            w_user["total_won"] += 2000
+            w_user["wins_count"] += 1
+            w_user["score"] += 1
+
+            l_user = get_user(loser_id)
+            l_user["last_duet_time"] = time.time()
+
+            next_duet_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⚔️ Keyingi raqibni topish", callback_data="live_duet")],
+                [InlineKeyboardButton(text="🏠 Asosiy menyu", callback_data="back_to_menu")]
+            ])
+
+            try:
+                await bot.send_message(
+                    winner_id, 
+                    "✅ **Javobingiz to'g'ri!** 🎉\n\n🎉 **Siz jonli duetda g'alaba qozondingiz!** 🏆\nBalansingizga `2 000 UZS` qo'shildi va reytingga `+1 ball` yozildi!", 
+                    reply_markup=next_duet_kb, 
+                    parse_mode="Markdown"
+                )
+                await bot.send_message(
+                    loser_id, 
+                    "❌ **Javobingiz hato!** Siz hato javob berdingiz, raqib to'g'ri topdi.\n\n⏳ Siz oxirgi duetda mag'lub bo'ldingiz! Keyingi o'yin 24 soat ichida qayta raqib qidirishingiz mumkin. Oldindan omad!", 
+                    parse_mode="Markdown"
+                )
+            except:
+                pass
+
+            del ACTIVE_DUETS[room_id]
+            return
+        else:
+            # Noto'g'ri javob berdi -> Raqibga g'alaba o'tadi
+            w_user = get_user(loser_id)
+            w_user["balance"] += 2000
+            w_user["total_won"] += 2000
+            w_user["wins_count"] += 1
+            w_user["score"] += 1
+
+            l_user = get_user(winner_id) # Joriy yuboruvchi yutqazdi
+            l_user["last_duet_time"] = time.time()
+
+            next_duet_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⚔️ Keyingi raqibni topish", callback_data="live_duet")],
+                [InlineKeyboardButton(text="🏠 Asosiy menyu", callback_data="back_to_menu")]
+            ])
+
+            try:
+                await bot.send_message(
+                    winner_id, 
+                    "❌ **Javobingiz hato!** Siz hato javob berdingiz.\n\n⏳ Siz oxirgi duetda mag'lub bo'ldingiz! Keyingi o'yin 24 soat ichida qayta raqib qidirishingiz mumkin. Oldindan omad!", 
+                    parse_mode="Markdown"
+                )
+                await bot.send_message(
+                    loser_id, 
+                    "✅ Raqib xato javob berdi!\n\n🎉 **Siz jonli duetda g'alaba qozondingiz!** 🏆\nBalansingizga `2 000 UZS` qo'shildi va reytingga `+1 ball` yozildi!", 
+                    reply_markup=next_duet_kb, 
+                    parse_mode="Markdown"
+                )
+            except:
+                pass
+
+            del ACTIVE_DUETS[room_id]
+            return
+
     # 2. Asosiy avtomatik o'yin javobini tekshirish
     if GAME_CONFIG["is_active"] and GAME_CONFIG["current_answer"]:
         correct_answers = GAME_CONFIG["current_answer"]
@@ -362,6 +417,7 @@ async def check_game_answer(message: Message, bot: Bot):
             u["score"] += 1  
 
             win_text = (
+                f"✅ **Javobingiz to'g'ri!**\n\n"
                 f"🎉 **TABRIKLAYMIZ! G'OLIB ANIQLANDI!** 🏆\n\n"
                 f"🥇 **G'olib:** @{u['username']} ({message.from_user.full_name})\n"
                 f"🎁 **Mukofot:** `3 000 UZS` va reytingga `+1 ball` qo'shildi!\n\n"
@@ -374,6 +430,9 @@ async def check_game_answer(message: Message, bot: Bot):
                     await bot.send_message(admin_id, f"🏆 **O'yin g'olibi aniqlandi!**\n\n👤 {message.from_user.full_name} (@{u['username']})\n🆔 `{uid}`", parse_mode="Markdown")
                 except:
                     pass
+        else:
+            # Agar asosiy o'yinda noto'g'ri javob yuborilsa
+            await message.answer("❌ **Javobingiz hato!** Qaytadan urinib ko'ring.", parse_mode="Markdown")
 
 # --- ADMIN PANEL ---
 @router.message(Command("admin"))
@@ -413,18 +472,27 @@ async def cb_admin_add_channel(call: CallbackQuery, state: FSMContext):
 @router.message(AdminStates.waiting_for_channel_title)
 async def save_ch_title(message: Message, state: FSMContext):
     await state.update_data(title=message.text.strip())
-    await message.answer("🔗 Kanal havolasi va ID yuboring (Masalan: `https://t.me/abevayn @abevayn`):", parse_mode="Markdown")
+    await message.answer("🔗 Kanal username'ini yoki ID'sini yuboring (Masalan: `@abevayn` yoki `-100123456789`):", parse_mode="Markdown")
     await state.set_state(AdminStates.waiting_for_channel_url)
 
 @router.message(AdminStates.waiting_for_channel_url)
 async def save_ch_url(message: Message, state: FSMContext):
     data = await state.get_data()
-    text_parts = message.text.strip().split()
-    url = text_parts[0]
-    ch_id = text_parts[1] if len(text_parts) > 1 else url
+    text_input = message.text.strip()
+    
+    # Havola yoki username'dan kanal ID/username'ini to'g'ri ajratib olish
+    ch_id = text_input
+    if "t.me/" in text_input:
+        parts = text_input.split("t.me/")
+        ch_username = "@" + parts[1].split("/")[0].strip()
+        ch_id = ch_username
+    elif not text_input.startswith("@") and not text_input.startswith("-100"):
+        ch_id = "@" + text_input
+
+    url = f"https://t.me/{ch_id.replace('@', '')}"
     CHANNELS_DB.append({"title": data["title"], "url": url, "id": ch_id})
     await state.clear()
-    await message.answer("✅ Kanal qo'shildi!", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
+    await message.answer(f"✅ Kanal muvaffaqiyatli qo'shildi: `{ch_id}`", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
 
 @router.callback_query(F.data == "admin_broadcast")
 async def cb_admin_broadcast(call: CallbackQuery, state: FSMContext):
@@ -439,7 +507,11 @@ async def execute_broadcast(message: Message, state: FSMContext, bot: Bot):
     text = message.text
     await state.clear()
     count = 0
-    for uid in USERS_DB.keys():
+    
+    # Agar USERS_DB bo'sh bo'lsa, xatolik chiqmasligi uchun yuboruvchining o'zini ham bazaga qo'shamiz
+    get_user(message.from_user.id, message.from_user.full_name, message.from_user.username)
+    
+    for uid in list(USERS_DB.keys()):
         try:
             await bot.send_message(uid, text)
             count += 1
@@ -452,8 +524,12 @@ async def execute_broadcast(message: Message, state: FSMContext, bot: Bot):
 async def cb_admin_force_start(call: CallbackQuery, bot: Bot):
     if not is_admin(call.from_user.id):
         return
+    
+    # Adminning o'zini ham bazaga kiritib qo'shamiz (bazalar bo'sh qolib ketmasligi uchun)
+    get_user(call.from_user.id, call.from_user.full_name, call.from_user.username)
+    
     await trigger_game(bot)
-    await call.message.edit_text("🚀 O'yin boshlandi va savol yuborildi!", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
+    await call.message.edit_text("🚀 O'yin majburiy boshlandi va barchaga savol yuborildi!", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
     await call.answer()
 
 @router.callback_query(F.data == "admin_stats")
@@ -474,7 +550,7 @@ async def trigger_game(bot: Bot):
 
     game_msg = f"🎮 **YANGI MINI-O'YIN BOSHLANDI!** ⚡\n\n{game['q']}\n\n👇 Botga birinchi bo'lib to'g'ri javobni yuboring!"
 
-    for uid in USERS_DB.keys():
+    for uid in list(USERS_DB.keys()):
         try:
             await bot.send_message(uid, game_msg, parse_mode="Markdown")
             await asyncio.sleep(0.04)
