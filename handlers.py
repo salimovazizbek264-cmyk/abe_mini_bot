@@ -20,7 +20,8 @@ GAME_CONFIG = {
     "time1": "10:00",
     "time2": "20:00",
     "is_active": False,
-    "current_answer": None
+    "current_answer": None,
+    "winner_username": None
 }
 
 DUET_QUEUE = []
@@ -430,7 +431,7 @@ async def cb_admin_stats(call: CallbackQuery):
     )
     await call.answer()
 
-# --- XABARLAR VA O'YINLARNI TEKSHIRISH (Xavfsiz va xatosiz) ---
+# --- XABARLAR VA O'YINLARNI TEKSHIRISH ---
 @router.message(F.text & ~F.text.startswith("/"))
 async def check_game_answer(message: Message, bot: Bot):
     uid = message.from_user.id
@@ -523,10 +524,12 @@ async def check_game_answer(message: Message, bot: Bot):
             u["wins_count"] += 1
             u["score"] += 1  
 
+            winner_handle = f"@{u['username']}" if u['username'] != "yo'q" else u['full_name']
+            GAME_CONFIG["winner_username"] = winner_handle
+
             win_text = (
                 f"Javobingiz to'g'ri!\n\n"
-                f"TABRIKLAYMIZ! G'OLIB ANIQLANDI!\n\n"
-                f"G'olib: @{u['username']} ({message.from_user.full_name})\n"
+                f"TABRIKLAYMIZ! G'OLIB SIZ BO'LDINGIZ!\n\n"
                 f"Mukofot: 3 000 UZS va reytingga +1 ball qo'shildi!\n\n"
                 f"Keyingi o'yinni kuting"
             )
@@ -534,16 +537,21 @@ async def check_game_answer(message: Message, bot: Bot):
 
             for admin_id in ADMIN_IDS:
                 try:
-                    await bot.send_message(admin_id, f"O'yin g'olibi aniqlandi!\n\nIsm: {message.from_user.full_name}\nUsername: @{u['username']}\nID: {uid}")
+                    await bot.send_message(admin_id, f"O'yin g'olibi aniqlandi!\n\nIsm: {message.from_user.full_name}\nUsername: {winner_handle}\nID: {uid}")
                 except:
                     pass
         else:
-            await message.answer("Javobingiz xato! Qaytadan urinib ko'ring.")
+            winner_handle = GAME_CONFIG.get("winner_username")
+            if winner_handle:
+                await message.answer(f"Kechirasiz, ozgina kech qoldingiz! ⏳\n{winner_handle} birinchi bo'lib to'g'ri javobni yubordi va g'olib bo'ldi.")
+            else:
+                await message.answer("Javobingiz xato! Qaytadan urinib ko'ring.")
 
 async def trigger_game(bot: Bot):
     game = get_quick_game()
     GAME_CONFIG["is_active"] = True
     GAME_CONFIG["current_answer"] = game["ans"]
+    GAME_CONFIG["winner_username"] = None  # Yangi o'yin boshlanganda g'olib tozalanadi
 
     game_msg = f"🎮 **TEZKOR MINI-O'YIN!** ⚡\n\n{game['q']}\n\n👇 Botga birinchi bo'lib to'g'ri javobni yuboring!"
 
