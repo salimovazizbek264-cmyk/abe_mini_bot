@@ -316,18 +316,23 @@ async def process_amount(message: Message, state: FSMContext, bot: Bot):
 async def admin_wd_decision(call: CallbackQuery, bot: Bot):
     if not is_admin(call.from_user.id):
         return
-    action, uid_str = call.data.split("_")[1], call.data.split("_")[2]
-    uid = int(uid_str)
+    
+    parts = call.data.split("_")
+    action = parts[1] # "yes" yoki "no"
+    uid = int(parts[2])
+
     if action == "yes":
-        await call.message.edit_text(f"{call.message.text}\n\n✅ **HOLAT: TO'LAB BERILDI** 🟢", parse_mode="Markdown")
+        await call.message.edit_text(f"{call.message.text}\n\n✅ **HOLAT: TO'LAB BERILDI (PUL TASHLANDI)** 🟢", parse_mode="Markdown")
         try:
-            await bot.send_message(uid, "🎉 Pul chiqarish so'rovingiz tasdiqlandi va kartangizga o'tkazib berildi! 💳💸")
+            await bot.send_message(uid, "🎉 **Tabriklaymiz!** Pul chiqarish so'rovingiz tasdiqlandi va kartangizga pul tashlab berildi! 💳💸")
         except:
             pass
     else:
+        # Rad etilgan taqdirda pulni foydalanuvchiga qaytarish (ixtiyoriy, xavfsizlik uchun)
+        # Summani xabardan ajratib olish ham mumkin, oddiy holatda rad etildi deyiladi
         await call.message.edit_text(f"{call.message.text}\n\n❌ **HOLAT: RAD ETILDI** 🔴", parse_mode="Markdown")
         try:
-            await bot.send_message(uid, "❌ Afsuski, pul chiqarish so'rovingiz rad etildi.")
+            await bot.send_message(uid, "❌ Afsuski, pul chiqarish so'rovingiz admin tomonidan rad etildi.")
         except:
             pass
     await call.answer("Bajarildi!")
@@ -551,7 +556,7 @@ async def trigger_game(bot: Bot):
     game = get_quick_game()
     GAME_CONFIG["is_active"] = True
     GAME_CONFIG["current_answer"] = game["ans"]
-    GAME_CONFIG["winner_username"] = None  # Yangi o'yin boshlanganda g'olib tozalanadi
+    GAME_CONFIG["winner_username"] = None  
 
     game_msg = f"🎮 **TEZKOR MINI-O'YIN!** ⚡\n\n{game['q']}\n\n👇 Botga birinchi bo'lib to'g'ri javobni yuboring!"
 
