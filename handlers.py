@@ -14,7 +14,7 @@ from games_db import get_random_game
 
 router = Router()
 
-USERS_DB = {}          # user_id: {balance, total_won, wins_count, score, username, full_name, last_duet_time}
+USERS_DB = {}          
 CHANNELS_DB = []       
 GAME_CONFIG = {
     "time1": "10:00",
@@ -23,9 +23,8 @@ GAME_CONFIG = {
     "current_answer": None
 }
 
-# Jonli duet navbati va faol xonalar
 DUET_QUEUE = []
-ACTIVE_DUETS = {}      # room_id: {p1, p2, answer, question}
+ACTIVE_DUETS = {}      
 
 ADMIN_IDS = {8007670371}  
 
@@ -74,6 +73,14 @@ async def check_channels_subscription(bot: Bot, user_id: int) -> bool:
             pass
     return True
 
+# --- ADMIN PANEL (Oldingi qismga qo'yildi, boshqalar to'smaydi) ---
+@router.message(Command("admin"))
+async def cmd_admin(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Siz admin emassiz!")
+        return
+    await message.answer("🔧 **PROFESSIONAL ADMIN PANEL** 🛡️", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, bot: Bot):
     uid = message.from_user.id
@@ -83,7 +90,7 @@ async def cmd_start(message: Message, bot: Bot):
         ref_id_str = args[1]
         if ref_id_str.isdigit():
             ref_id = int(ref_id_str)
-            if ref_id != uid and ref_id in USERS_DB and uid not in [u.get("referred_by") for u in USERS_DB.values()]:
+            if ref_id != uid and ref_id in USERS_DB:
                 USERS_DB[ref_id]["balance"] += 100
                 USERS_DB[ref_id]["total_won"] += 100
                 try:
@@ -312,8 +319,107 @@ async def admin_wd_decision(call: CallbackQuery, bot: Bot):
             pass
     await call.answer("Bajarildi!")
 
-# --- XABARLAR VA JONLI DUET / O'YINLARNI TEKSHIRISH ---
-@router.message(F.text)
+# --- ADMIN PANEL CALLBACKS VA FSM BOSHQaruvi ---
+@router.callback_query(F.data == "admin_set_times")
+async def cb_admin_set_times(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return
+    await call.message.edit_text("⏰ **1-o'yin vaqtini yuboring** (Masalan: `10:00`):", reply_markup=kb.back_to_menu_kb(), parse_mode="Markdown")
+    await state.set_state(AdminStates.waiting_for_time1)
+    await call.answer()
+
+@router.message(AdminStates.waiting_for_time1)
+async def save_time1(message: Message, state: FSMContext):
+    GAME_CONFIG["time1"] = message.text.strip()
+    await message.answer("⏰ **2-o'yin vaqtini yuboring** (Masalan: `20:00`):", parse_mode="Markdown")
+    await state.set_state(AdminStates.waiting_for_time2)
+
+@router.message(AdminStates.waiting_for_time2)
+async def save_time2(message: Message, state: FSMContext):
+    GAME_CONFIG["time2"] = message.text.strip()
+    await state.clear()
+    await message.answer(f"✅ O'yin vaqtlari yangilandi:\n1️⃣ `{GAME_CONFIG['time1']}`\n2️⃣ `{GAME_CONFIG['time2']}`", reply_markup=kb.main_menu_kb(), parse_mode="Markdown")
+
+@router.callback_query(F.data == "admin_add_channel")
+async def cb_admin_add_channel(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return
+    await call.message.edit_text("📢 Majburiy kanal nomini yuboring:", reply_markup=kb.back_to_menu_kb(), parse_mode="Markdown")
+    await state.set_state(AdminStates.waiting_for_channel_title)
+    await call.answer()
+
+@router.message(AdminStates.waiting_for_channel_title)
+async def save_ch_title(message: Message, state: FSMContext):
+    await state.update_data(title=message.text.strip())
+    await message.answer("🔗 Kanal username'ini yoki ID'sini yuboring (Masalan: `@abevayn` yoki `-100123456789`):", parse_mode="Markdown")
+    await state.set_state(AdminStates.waiting_for_channel_url)
+
+@router.message(AdminStates.waiting_for_channel_url)
+async def save_ch_url(message: Message, state: FSMContext):
+    data = await state.get_data()
+    text_input = message.text.strip()
+    
+    ch_id = text_input
+    if "t.me/" in text_input:
+        parts = text_input.split("t.me/")
+        ch_username = "@" + parts[1].split("/")[0].strip()
+        ch_id = ch_username
+    elif not text_input.startswith("@") and not text_input.startswith("-100"):
+        ch_id = "@" + text_input
+
+    url = f"https://t.me/{ch_id.replace('@', '')}"
+    CHANNELS_DB.append({"title": data["title"], "url": url, "id": ch_id})
+    await state.clear()
+    await message.answer(f"✅ Kanal muvaffaqiyatli qo'shildi: `{ch_id}`", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
+
+@router.callback_query(F.data == "admin_broadcast")
+async def cb_admin_broadcast(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return
+    await call.message.edit_text("📢 Hammaga yuboriladigan xabarni kiriting:", reply_markup=kb.back_to_menu_kb(), parse_mode="Markdown")
+    await state.set_state(AdminStates.waiting_for_broadcast)
+    await call.answer()
+
+@router.message(AdminStates.waiting_for_broadcast)
+async def execute_broadcast(message: Message, state: FSMContext, bot: Bot):
+    text = message.text
+    await state.clear()
+    count = 0
+    
+    get_user(message.from_user.id, message.from_user.full_name, message.from_user.username)
+    
+    for uid in list(USERS_DB.keys()):
+        try:
+            await bot.send_message(uid, text)
+            count += 1
+            await asyncio.sleep(0.05)
+        except:
+            pass
+    await message.answer(f"✅ Xabar `{count}` ta foydalanuvchiga yetkazildi!", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
+
+@router.callback_query(F.data == "admin_force_start")
+async def cb_admin_force_start(call: CallbackQuery, bot: Bot):
+    if not is_admin(call.from_user.id):
+        return
+    
+    get_user(call.from_user.id, call.from_user.full_name, call.from_user.username)
+    await trigger_game(bot)
+    await call.message.edit_text("🚀 O'yin majburiy boshlandi va barchaga savol yuborildi!", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
+    await call.answer()
+
+@router.callback_query(F.data == "admin_stats")
+async def cb_admin_stats(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return
+    await call.message.edit_text(
+        f"📊 **STATISTIKA**\n\n👥 Foydalanuvchilar: `{len(USERS_DB)}` ta\n⏰ O'yin vaqtlari: `{GAME_CONFIG['time1']}` | `{GAME_CONFIG['time2']}`",
+        reply_markup=kb.admin_panel_kb(),
+        parse_mode="Markdown"
+    )
+    await call.answer()
+
+# --- XABARLAR VA O'YINLARNI TEKSHIRISH (Faqat slash bilan boshlanmagan matnlar uchun) ---
+@router.message(F.text & ~F.text.startswith("/"))
 async def check_game_answer(message: Message, bot: Bot):
     uid = message.from_user.id
     text = message.text.strip()
@@ -338,8 +444,12 @@ async def check_game_answer(message: Message, bot: Bot):
         winner_id = uid
         loser_id = duet["p2"] if uid == duet["p1"] else duet["p1"]
 
+        next_duet_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⚔️ Keyingi raqibni topish", callback_data="live_duet")],
+            [InlineKeyboardButton(text="🏠 Asosiy menyu", callback_data="back_to_menu")]
+        ])
+
         if is_correct:
-            # To'g'ri javob berdi
             w_user = get_user(winner_id)
             w_user["balance"] += 2000
             w_user["total_won"] += 2000
@@ -348,11 +458,6 @@ async def check_game_answer(message: Message, bot: Bot):
 
             l_user = get_user(loser_id)
             l_user["last_duet_time"] = time.time()
-
-            next_duet_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⚔️ Keyingi raqibni topish", callback_data="live_duet")],
-                [InlineKeyboardButton(text="🏠 Asosiy menyu", callback_data="back_to_menu")]
-            ])
 
             try:
                 await bot.send_message(
@@ -372,20 +477,14 @@ async def check_game_answer(message: Message, bot: Bot):
             del ACTIVE_DUETS[room_id]
             return
         else:
-            # Noto'g'ri javob berdi -> Raqibga g'alaba o'tadi
             w_user = get_user(loser_id)
             w_user["balance"] += 2000
             w_user["total_won"] += 2000
             w_user["wins_count"] += 1
             w_user["score"] += 1
 
-            l_user = get_user(winner_id) # Joriy yuboruvchi yutqazdi
+            l_user = get_user(winner_id)
             l_user["last_duet_time"] = time.time()
-
-            next_duet_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⚔️ Keyingi raqibni topish", callback_data="live_duet")],
-                [InlineKeyboardButton(text="🏠 Asosiy menyu", callback_data="back_to_menu")]
-            ])
 
             try:
                 await bot.send_message(
@@ -431,117 +530,7 @@ async def check_game_answer(message: Message, bot: Bot):
                 except:
                     pass
         else:
-            # Agar asosiy o'yinda noto'g'ri javob yuborilsa
             await message.answer("❌ **Javobingiz hato!** Qaytadan urinib ko'ring.", parse_mode="Markdown")
-
-# --- ADMIN PANEL ---
-@router.message(Command("admin"))
-async def cmd_admin(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    await message.answer("🔧 **PROFESSIONAL ADMIN PANEL** 🛡️", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
-
-@router.callback_query(F.data == "admin_set_times")
-async def cb_admin_set_times(call: CallbackQuery, state: FSMContext):
-    if not is_admin(call.from_user.id):
-        return
-    await call.message.edit_text("⏰ **1-o'yin vaqtini yuboring** (Masalan: `10:00`):", reply_markup=kb.back_to_menu_kb(), parse_mode="Markdown")
-    await state.set_state(AdminStates.waiting_for_time1)
-    await call.answer()
-
-@router.message(AdminStates.waiting_for_time1)
-async def save_time1(message: Message, state: FSMContext):
-    GAME_CONFIG["time1"] = message.text.strip()
-    await message.answer("⏰ **2-o'yin vaqtini yuboring** (Masalan: `20:00`):", parse_mode="Markdown")
-    await state.set_state(AdminStates.waiting_for_time2)
-
-@router.message(AdminStates.waiting_for_time2)
-async def save_time2(message: Message, state: FSMContext):
-    GAME_CONFIG["time2"] = message.text.strip()
-    await state.clear()
-    await message.answer(f"✅ O'yin vaqtlari yangilandi:\n1️⃣ `{GAME_CONFIG['time1']}`\n2️⃣ `{GAME_CONFIG['time2']}`", reply_markup=kb.main_menu_kb(), parse_mode="Markdown")
-
-@router.callback_query(F.data == "admin_add_channel")
-async def cb_admin_add_channel(call: CallbackQuery, state: FSMContext):
-    if not is_admin(call.from_user.id):
-        return
-    await call.message.edit_text("📢 Majburiy kanal nomini yuboring:", reply_markup=kb.back_to_menu_kb(), parse_mode="Markdown")
-    await state.set_state(AdminStates.waiting_for_channel_title)
-    await call.answer()
-
-@router.message(AdminStates.waiting_for_channel_title)
-async def save_ch_title(message: Message, state: FSMContext):
-    await state.update_data(title=message.text.strip())
-    await message.answer("🔗 Kanal username'ini yoki ID'sini yuboring (Masalan: `@abevayn` yoki `-100123456789`):", parse_mode="Markdown")
-    await state.set_state(AdminStates.waiting_for_channel_url)
-
-@router.message(AdminStates.waiting_for_channel_url)
-async def save_ch_url(message: Message, state: FSMContext):
-    data = await state.get_data()
-    text_input = message.text.strip()
-    
-    # Havola yoki username'dan kanal ID/username'ini to'g'ri ajratib olish
-    ch_id = text_input
-    if "t.me/" in text_input:
-        parts = text_input.split("t.me/")
-        ch_username = "@" + parts[1].split("/")[0].strip()
-        ch_id = ch_username
-    elif not text_input.startswith("@") and not text_input.startswith("-100"):
-        ch_id = "@" + text_input
-
-    url = f"https://t.me/{ch_id.replace('@', '')}"
-    CHANNELS_DB.append({"title": data["title"], "url": url, "id": ch_id})
-    await state.clear()
-    await message.answer(f"✅ Kanal muvaffaqiyatli qo'shildi: `{ch_id}`", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
-
-@router.callback_query(F.data == "admin_broadcast")
-async def cb_admin_broadcast(call: CallbackQuery, state: FSMContext):
-    if not is_admin(call.from_user.id):
-        return
-    await call.message.edit_text("📢 Hammaga yuboriladigan xabarni kiriting:", reply_markup=kb.back_to_menu_kb(), parse_mode="Markdown")
-    await state.set_state(AdminStates.waiting_for_broadcast)
-    await call.answer()
-
-@router.message(AdminStates.waiting_for_broadcast)
-async def execute_broadcast(message: Message, state: FSMContext, bot: Bot):
-    text = message.text
-    await state.clear()
-    count = 0
-    
-    # Agar USERS_DB bo'sh bo'lsa, xatolik chiqmasligi uchun yuboruvchining o'zini ham bazaga qo'shamiz
-    get_user(message.from_user.id, message.from_user.full_name, message.from_user.username)
-    
-    for uid in list(USERS_DB.keys()):
-        try:
-            await bot.send_message(uid, text)
-            count += 1
-            await asyncio.sleep(0.05)
-        except:
-            pass
-    await message.answer(f"✅ Xabar `{count}` ta foydalanuvchiga yetkazildi!", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
-
-@router.callback_query(F.data == "admin_force_start")
-async def cb_admin_force_start(call: CallbackQuery, bot: Bot):
-    if not is_admin(call.from_user.id):
-        return
-    
-    # Adminning o'zini ham bazaga kiritib qo'shamiz (bazalar bo'sh qolib ketmasligi uchun)
-    get_user(call.from_user.id, call.from_user.full_name, call.from_user.username)
-    
-    await trigger_game(bot)
-    await call.message.edit_text("🚀 O'yin majburiy boshlandi va barchaga savol yuborildi!", reply_markup=kb.admin_panel_kb(), parse_mode="Markdown")
-    await call.answer()
-
-@router.callback_query(F.data == "admin_stats")
-async def cb_admin_stats(call: CallbackQuery):
-    if not is_admin(call.from_user.id):
-        return
-    await call.message.edit_text(
-        f"📊 **STATISTIKA**\n\n👥 Foydalanuvchilar: `{len(USERS_DB)}` ta\n⏰ O'yin vaqtlari: `{GAME_CONFIG['time1']}` | `{GAME_CONFIG['time2']}`",
-        reply_markup=kb.admin_panel_kb(),
-        parse_mode="Markdown"
-    )
-    await call.answer()
 
 async def trigger_game(bot: Bot):
     game = get_random_game()
