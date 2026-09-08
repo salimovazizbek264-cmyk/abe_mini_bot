@@ -1,6 +1,7 @@
 # handlers.py
 import asyncio
 import time
+import random
 from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
@@ -10,7 +11,6 @@ from aiogram.fsm.state import State, StatesGroup
 
 import texts
 import keyboards as kb
-from games_db import get_random_game
 
 router = Router()
 
@@ -27,6 +27,18 @@ DUET_QUEUE = []
 ACTIVE_DUETS = {}      
 
 ADMIN_IDS = {8007670371}  
+
+# --- SODDA VA QIZIQARLI TEZKOR O'YINLAR BAZASI ---
+QUICK_GAMES = [
+    {"q": "⚡ Tez bo'ling! Botga 'salom' deb yozing!", "ans": ["salom"]},
+    {"q": "🎯 Omadni sinang! 1 dan 3 gacha bo'lgan raqamlardan birini yozing (masalan: 2):", "ans": ["1", "2", "3"]},
+    {"q": "🔥 Tezlik o'yini! '+':", "ans": ["+"]},
+    {"q": "🧩 Rangni toping: 'qizil' yoki 'qora' deb yozing!", "ans": ["qizil", "qora"]},
+    {"q": "🇺🇿 Birinchi bo'lib O'zbekiston bayrog'i emojisini yuboring: 🇺🇿", "ans": ["🇺🇿", "uzbekistan"]}
+]
+
+def get_quick_game():
+    return random.choice(QUICK_GAMES)
 
 class WithdrawStates(StatesGroup):
     waiting_for_card = State()
@@ -73,7 +85,7 @@ async def check_channels_subscription(bot: Bot, user_id: int) -> bool:
             pass
     return True
 
-# --- ADMIN PANEL (Oldingi qismga qo'yildi, boshqalar to'smaydi) ---
+# --- ADMIN PANEL COMMAND ---
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
     if not is_admin(message.from_user.id):
@@ -159,7 +171,7 @@ async def cb_live_duet(call: CallbackQuery, bot: Bot):
         p1 = DUET_QUEUE.pop(0)
         p2 = DUET_QUEUE.pop(0)
         
-        game = get_random_game()
+        game = get_quick_game()
         room_id = f"{p1}_{p2}_{int(time.time())}"
         ACTIVE_DUETS[room_id] = {
             "p1": p1,
@@ -319,7 +331,7 @@ async def admin_wd_decision(call: CallbackQuery, bot: Bot):
             pass
     await call.answer("Bajarildi!")
 
-# --- ADMIN PANEL CALLBACKS VA FSM BOSHQaruvi ---
+# --- ADMIN PANEL CALLBACKS VA FSM ---
 @router.callback_query(F.data == "admin_set_times")
 async def cb_admin_set_times(call: CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id):
@@ -418,7 +430,7 @@ async def cb_admin_stats(call: CallbackQuery):
     )
     await call.answer()
 
-# --- XABARLAR VA O'YINLARNI TEKSHIRISH (Faqat slash bilan boshlanmagan matnlar uchun) ---
+# --- XABARLAR VA O'YINLARNI TEKSHIRISH (Xavfsiz va xatosiz) ---
 @router.message(F.text & ~F.text.startswith("/"))
 async def check_game_answer(message: Message, bot: Bot):
     uid = message.from_user.id
@@ -462,14 +474,12 @@ async def check_game_answer(message: Message, bot: Bot):
             try:
                 await bot.send_message(
                     winner_id, 
-                    "✅ **Javobingiz to'g'ri!** 🎉\n\n🎉 **Siz jonli duetda g'alaba qozondingiz!** 🏆\nBalansingizga `2 000 UZS` qo'shildi va reytingga `+1 ball` yozildi!", 
-                    reply_markup=next_duet_kb, 
-                    parse_mode="Markdown"
+                    "Javobingiz to'g'ri!\n\nSiz jonli duetda g'alaba qozondingiz!\nBalansingizga 2 000 UZS qo'shildi va reytingga +1 ball yozildi!", 
+                    reply_markup=next_duet_kb
                 )
                 await bot.send_message(
                     loser_id, 
-                    "❌ **Javobingiz hato!** Siz hato javob berdingiz, raqib to'g'ri topdi.\n\n⏳ Siz oxirgi duetda mag'lub bo'ldingiz! Keyingi o'yin 24 soat ichida qayta raqib qidirishingiz mumkin. Oldindan omad!", 
-                    parse_mode="Markdown"
+                    "Javobingiz xato! Siz xato javob berdingiz, raqib to'g'ri topdi.\n\nSiz oxirgi duetda mag'lub bo'ldingiz! Keyingi o'yin 24 soat ichida qayta raqib qidirishingiz mumkin. Oldindan omad!"
                 )
             except:
                 pass
@@ -489,14 +499,12 @@ async def check_game_answer(message: Message, bot: Bot):
             try:
                 await bot.send_message(
                     winner_id, 
-                    "❌ **Javobingiz hato!** Siz hato javob berdingiz.\n\n⏳ Siz oxirgi duetda mag'lub bo'ldingiz! Keyingi o'yin 24 soat ichida qayta raqib qidirishingiz mumkin. Oldindan omad!", 
-                    parse_mode="Markdown"
+                    "Javobingiz xato! Siz xato javob berdingiz.\n\nSiz oxirgi duetda mag'lub bo'ldingiz! Keyingi o'yin 24 soat ichida qayta raqib qidirishingiz mumkin. Oldindan omad!"
                 )
                 await bot.send_message(
                     loser_id, 
-                    "✅ Raqib xato javob berdi!\n\n🎉 **Siz jonli duetda g'alaba qozondingiz!** 🏆\nBalansingizga `2 000 UZS` qo'shildi va reytingga `+1 ball` yozildi!", 
-                    reply_markup=next_duet_kb, 
-                    parse_mode="Markdown"
+                    "Raqib xato javob berdi!\n\nSiz jonli duetda g'alaba qozondingiz!\nBalansingizga 2 000 UZS qo'shildi va reytingga +1 ball yozildi!", 
+                    reply_markup=next_duet_kb
                 )
             except:
                 pass
@@ -504,7 +512,7 @@ async def check_game_answer(message: Message, bot: Bot):
             del ACTIVE_DUETS[room_id]
             return
 
-    # 2. Asosiy avtomatik o'yin javobini tekshirish
+    # 2. Asosiy tezkor mini-o'yin javobini tekshirish
     if GAME_CONFIG["is_active"] and GAME_CONFIG["current_answer"]:
         correct_answers = GAME_CONFIG["current_answer"]
         if any(ans in user_ans for ans in correct_answers):
@@ -516,28 +524,28 @@ async def check_game_answer(message: Message, bot: Bot):
             u["score"] += 1  
 
             win_text = (
-                f"✅ **Javobingiz to'g'ri!**\n\n"
-                f"🎉 **TABRIKLAYMIZ! G'OLIB ANIQLANDI!** 🏆\n\n"
-                f"🥇 **G'olib:** @{u['username']} ({message.from_user.full_name})\n"
-                f"🎁 **Mukofot:** `3 000 UZS` va reytingga `+1 ball` qo'shildi!\n\n"
-                f"Keyingi o'yinni kuting 🚀"
+                f"Javobingiz to'g'ri!\n\n"
+                f"TABRIKLAYMIZ! G'OLIB ANIQLANDI!\n\n"
+                f"G'olib: @{u['username']} ({message.from_user.full_name})\n"
+                f"Mukofot: 3 000 UZS va reytingga +1 ball qo'shildi!\n\n"
+                f"Keyingi o'yinni kuting"
             )
-            await message.answer(win_text, parse_mode="Markdown")
+            await message.answer(win_text)
 
             for admin_id in ADMIN_IDS:
                 try:
-                    await bot.send_message(admin_id, f"🏆 **O'yin g'olibi aniqlandi!**\n\n👤 {message.from_user.full_name} (@{u['username']})\n🆔 `{uid}`", parse_mode="Markdown")
+                    await bot.send_message(admin_id, f"O'yin g'olibi aniqlandi!\n\nIsm: {message.from_user.full_name}\nUsername: @{u['username']}\nID: {uid}")
                 except:
                     pass
         else:
-            await message.answer("❌ **Javobingiz hato!** Qaytadan urinib ko'ring.", parse_mode="Markdown")
+            await message.answer("Javobingiz xato! Qaytadan urinib ko'ring.")
 
 async def trigger_game(bot: Bot):
-    game = get_random_game()
+    game = get_quick_game()
     GAME_CONFIG["is_active"] = True
     GAME_CONFIG["current_answer"] = game["ans"]
 
-    game_msg = f"🎮 **YANGI MINI-O'YIN BOSHLANDI!** ⚡\n\n{game['q']}\n\n👇 Botga birinchi bo'lib to'g'ri javobni yuboring!"
+    game_msg = f"🎮 **TEZKOR MINI-O'YIN!** ⚡\n\n{game['q']}\n\n👇 Botga birinchi bo'lib to'g'ri javobni yuboring!"
 
     for uid in list(USERS_DB.keys()):
         try:
